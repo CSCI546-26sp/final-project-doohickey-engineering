@@ -1,0 +1,89 @@
+services:
+
+  # --- runs the full test suite ---
+  tests:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: log_tests
+    command: bash docker/scripts/run_tests.sh
+    environment:
+      - NODE_ID=node-1
+    volumes:
+      - test-results:/app/build/test-results
+
+  # --- node-1: data plane server ---
+  node1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: node1
+    command: ./build/log_server node-1 0.0.0.0:50051 auth:50053
+    ports:
+      - "50051:50051"
+    depends_on:
+      - auth
+    networks:
+      - lognet
+
+  # --- node-2: data plane server ---
+  node2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: node2
+    command: ./build/log_server node-2 0.0.0.0:50052 auth:50053
+    ports:
+      - "50052:50052"
+    depends_on:
+      - auth
+    networks:
+      - lognet
+
+  # --- node-3: data plane server ---
+  node3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: node3
+    command: ./build/log_server node-3 0.0.0.0:50053 auth:50053
+    ports:
+      - "50053:50053"
+    depends_on:
+      - auth
+    networks:
+      - lognet
+
+  # --- venkat's auth stub (fake for now) ---
+  auth:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: auth
+    command: ./build/fake_auth_server 0.0.0.0:50053
+    ports:
+      - "50060:50053"
+    networks:
+      - lognet
+
+  # --- integration test: push from node1 → node2 ---
+  client:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: log_client
+    command: ./build/log_client node2:50052
+    depends_on:
+      - node1
+      - node2
+    networks:
+      - lognet
+    profiles:
+      - integration  # only runs with: docker compose --profile integration up
+
+networks:
+  lognet:
+    driver: bridge
+
+volumes:
+  test-results:
