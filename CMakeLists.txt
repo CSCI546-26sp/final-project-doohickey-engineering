@@ -1,4 +1,5 @@
 ﻿cmake_minimum_required(VERSION 3.15)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(distributed_log)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -36,11 +37,12 @@ add_custom_command(
 add_library(loglib
     src/lamport_clock.cpp
     src/log_store.cpp
+    src/raft_node.cpp
     ${PROTO_OUT}/locality_messaging.pb.cc
     ${PROTO_OUT}/locality_messaging.grpc.pb.cc
 )
 target_include_directories(loglib PUBLIC include ${PROTO_OUT})
-target_link_libraries(loglib PUBLIC grpc++ libprotobuf z)
+target_link_libraries(loglib PUBLIC grpc++ libprotobuf)
 
 add_executable(log_server src/log_server.cpp)
 target_include_directories(log_server PRIVATE include ${PROTO_OUT})
@@ -53,3 +55,11 @@ target_link_libraries(fake_auth_server PRIVATE loglib)
 add_executable(log_client src/log_client.cpp)
 target_include_directories(log_client PRIVATE include ${PROTO_OUT})
 target_link_libraries(log_client PRIVATE loglib)
+
+add_executable(raft_server src/raft_server.cpp)
+target_include_directories(raft_server PRIVATE include ${PROTO_OUT})
+target_link_libraries(raft_server PRIVATE loglib)
+
+add_executable(raft_test_client src/raft_test_client.cpp)
+target_include_directories(raft_test_client PRIVATE include ${PROTO_OUT})
+target_link_libraries(raft_test_client PRIVATE loglib)
