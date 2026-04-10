@@ -8,6 +8,7 @@ include(FetchContent)
 FetchContent_Declare(Catch2 GIT_REPOSITORY https://github.com/catchorg/Catch2.git GIT_TAG v3.5.3)
 FetchContent_MakeAvailable(Catch2)
 
+# This guarantees perfectly matched versions, completely bypassing the broken Ubuntu packages
 FetchContent_Declare(gRPC GIT_REPOSITORY https://github.com/grpc/grpc.git GIT_TAG v1.62.0 GIT_SUBMODULES_RECURSE ON)
 set(FETCHCONTENT_QUIET OFF)
 set(gRPC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -47,10 +48,6 @@ target_link_libraries(loglib PUBLIC grpc++ libprotobuf)
 add_executable(log_server src/log_server.cpp)
 target_include_directories(log_server PRIVATE include ${PROTO_OUT})
 target_link_libraries(log_server PRIVATE loglib)
-
-add_executable(fake_auth_server src/fake_auth_server.cpp)
-target_include_directories(fake_auth_server PRIVATE include ${PROTO_OUT})
-target_link_libraries(fake_auth_server PRIVATE loglib)
 
 add_executable(log_client src/log_client.cpp)
 target_include_directories(log_client PRIVATE include ${PROTO_OUT})
