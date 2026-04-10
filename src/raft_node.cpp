@@ -319,3 +319,14 @@ grpc::Status RaftNode::HandleAppendEntries(const AppendEntriesArgs* req, AppendE
     resp->set_success(true);
     return grpc::Status::OK;
 }
+
+grpc::Status RaftNode::HandleListUsers(const ListUsersRequest* req, ListUsersResponse* resp) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    
+    for (const auto& user : authorized_users_) {
+        resp->add_authorized_users(user);
+    }
+    resp->set_current_epoch(current_epoch_);
+    
+    return grpc::Status::OK;
+}

@@ -34,6 +34,7 @@ public:
     // --- Raft RPC Handlers ---
     grpc::Status HandleRequestVote(const RequestVoteArgs* req, RequestVoteReply* resp);
     grpc::Status HandleAppendEntries(const AppendEntriesArgs* req, AppendEntriesReply* resp);
+    grpc::Status HandleListUsers(const ListUsersRequest* req, ListUsersResponse* resp);
 
 private:
     std::string id_;

@@ -43,6 +43,9 @@ This project uses `FetchContent` to ensure all teammates use the exact same vers
 * **First Run:** The very first time you build, CMake will download and compile gRPC from source. This takes **30 minutes** on a standard VM. **Do not kill the process.**
 * **Subsequent Runs:** Once cached, rebuilding your code changes will take **less than 10 seconds**.
 
+```bash
+cmake --build build/ -j4
+```
 ---
 
 ## 3. Running the Tests

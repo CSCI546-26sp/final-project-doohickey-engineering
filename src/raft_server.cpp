@@ -48,6 +48,10 @@ public:
         return Status::OK;
     }
 
+    Status ListUsers(ServerContext* context, const ListUsersRequest* req, ListUsersResponse* resp) override {
+        return node_->HandleListUsers(req, resp);
+    }
+
     // --- Internal Raft RPCs ---
     Status RequestVote(ServerContext* context, const RequestVoteArgs* req, RequestVoteReply* resp) override {
         return node_->HandleRequestVote(req, resp);
