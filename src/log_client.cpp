@@ -20,7 +20,6 @@ public:
     bool SyncLogs(const std::string& my_node_id,
                   const std::string& my_address,
                   const std::vector<ChatEntry>& entries) {
-
         SyncLogsRequest req;
         NodeInfo* sender = req.mutable_sender();
         sender->set_node_id(my_node_id);
@@ -42,8 +41,11 @@ public:
             std::cerr << "SyncLogs failed: " << status.error_message() << "\n";
             return false;
         }
+
         std::cout << "SyncLogs ok - peer lamport_time="
-                  << resp.receiver_lamport_time() << "\n";
+                  << resp.receiver_lamport_time()
+                  << ", success=" << std::boolalpha << resp.success()
+                  << "\n";
         return resp.success();
     }
 
@@ -51,17 +53,29 @@ private:
     std::unique_ptr<DataPlaneGossip::Stub> stub_;
 };
 
+static std::vector<ChatEntry> BuildSampleLog(const std::string& node_id) {
+    return {
+        {node_id + "_1", node_id, "hello world", 1, 0, 0},
+        {node_id + "_2", node_id, "second entry", 2, 0, 0},
+    };
+}
+
 int main(int argc, char** argv) {
-    std::string target = argc > 1 ? argv[1] : "localhost:50052";
+    std::string target = "127.0.0.1:50052";
+    std::string my_node_id = "node-1";
+    std::string my_address = "127.0.0.1:50051";
+
+    if (argc > 1) target = argv[1];
+    if (argc > 2) my_node_id = argv[2];
+    if (argc > 3) my_address = argv[3];
+
+    std::cout << "Syncing from " << my_node_id
+              << " (" << my_address << ") to " << target << "\n";
 
     DataPlaneClient client(
         grpc::CreateChannel(target, grpc::InsecureChannelCredentials()));
 
-    std::vector<ChatEntry> local_log = {
-        {"node-1_1", "node-1", "hello world",  1, 0, 0},
-        {"node-1_2", "node-1", "second entry", 2, 0, 0},
-    };
-
-    client.SyncLogs("node-1", "localhost:50051", local_log);
+    std::vector<ChatEntry> local_log = BuildSampleLog(my_node_id);
+    client.SyncLogs(my_node_id, my_address, local_log);
     return 0;
 }
