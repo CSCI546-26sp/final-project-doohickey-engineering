@@ -1,5 +1,5 @@
 ﻿#include "log_store.h"
-#include <zlib.h>
+#include <functional>
 #include <algorithm>
 #include <stdexcept>
 
@@ -62,18 +62,18 @@ std::vector<ChatEntry> LogStore::all() const {
 }
 
 // ---------------------------------------------------------------
-// Hash â€” CRC32 over all payloads in order
+// Hash using standard C++ hash combination
 // ---------------------------------------------------------------
 uint32_t LogStore::get_hash() const {
     std::lock_guard<std::mutex> lock(mutex_);
-
-    uLong crc = crc32(0L, Z_NULL, 0);
+    
+    std::hash<std::string> hasher;
+    uint32_t combined_hash = 0;
     for (const auto& e : entries_) {
-        crc = crc32(crc,
-            reinterpret_cast<const Bytef*>(e.payload.data()),
-            e.payload.size());
+        // Standard C++ hash combination
+        combined_hash ^= static_cast<uint32_t>(hasher(e.payload)) + 0x9e3779b9 + (combined_hash << 6) + (combined_hash >> 2);
     }
-    return static_cast<uint32_t>(crc);
+    return combined_hash;
 }
 
 // ---------------------------------------------------------------
@@ -124,9 +124,5 @@ void LogStore::set_epoch(int32_t epoch) {
 // Checksum â€” payload only (metadata is mutable)
 // ---------------------------------------------------------------
 uint32_t LogStore::computeChecksum(const ChatEntry& e) const {
-    uLong crc = crc32(0L, Z_NULL, 0);
-    crc = crc32(crc,
-        reinterpret_cast<const Bytef*>(e.payload.data()),
-        e.payload.size());
-    return static_cast<uint32_t>(crc);
+    return static_cast<uint32_t>(std::hash<std::string>{}(e.payload));
 }

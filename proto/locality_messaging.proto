@@ -6,7 +6,7 @@ message ChatMessage {
   string message_id = 1;
   string sender_id = 2;
   string payload = 3;
-  int32 lamport_time = 4;
+  int64 lamport_time = 4;
   int32 epoch = 5;
   bytes signature = 6;
 }
@@ -23,7 +23,7 @@ message SyncLogsRequest {
 
 message SyncLogsResponse {
   bool success = 1;
-  int32 receiver_lamport_time = 2;
+  int64 receiver_lamport_time = 2;
 }
 
 service DataPlaneGossip {
