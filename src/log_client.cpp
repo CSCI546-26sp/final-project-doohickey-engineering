@@ -25,6 +25,7 @@ public:
         sender->set_node_id(my_node_id);
         sender->set_address(my_address);
 
+        // Copy local log entries into the request.
         for (const auto& e : entries) {
             ChatMessage* msg = req.add_logs();
             msg->set_message_id(e.message_id);
@@ -61,21 +62,33 @@ static std::vector<ChatEntry> BuildSampleLog(const std::string& node_id) {
 }
 
 int main(int argc, char** argv) {
-    std::string target = "127.0.0.1:50052";
     std::string my_node_id = "node-1";
     std::string my_address = "127.0.0.1:50051";
 
-    if (argc > 1) target = argv[1];
-    if (argc > 2) my_node_id = argv[2];
-    if (argc > 3) my_address = argv[3];
+    // Default to one peer if none are provided.
+    std::vector<std::string> peers = {"127.0.0.1:50052"};
+
+    if (argc > 1) my_node_id = argv[1];
+    if (argc > 2) my_address = argv[2];
+    if (argc > 3) {
+        peers.clear();
+        for (int i = 3; i < argc; ++i) {
+            peers.push_back(argv[i]);
+        }
+    }
 
     std::cout << "Syncing from " << my_node_id
-              << " (" << my_address << ") to " << target << "\n";
-
-    DataPlaneClient client(
-        grpc::CreateChannel(target, grpc::InsecureChannelCredentials()));
+              << " (" << my_address << ")" << "\n";
 
     std::vector<ChatEntry> local_log = BuildSampleLog(my_node_id);
-    client.SyncLogs(my_node_id, my_address, local_log);
+
+    // Send the same log to each peer.
+    for (const auto& target : peers) {
+        std::cout << "  -> peer " << target << "\n";
+        DataPlaneClient client(
+            grpc::CreateChannel(target, grpc::InsecureChannelCredentials()));
+        client.SyncLogs(my_node_id, my_address, local_log);
+    }
+
     return 0;
 }

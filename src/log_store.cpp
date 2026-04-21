@@ -126,3 +126,8 @@ void LogStore::set_epoch(int32_t epoch) {
 uint32_t LogStore::computeChecksum(const ChatEntry& e) const {
     return static_cast<uint32_t>(std::hash<std::string>{}(e.payload));
 }
+
+int64_t LogStore::get_lamport_time() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return static_cast<int64_t>(clock_.get());
+}

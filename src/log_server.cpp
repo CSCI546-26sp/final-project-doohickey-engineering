@@ -3,7 +3,15 @@
 #include <string>
 #include <vector>
 
-#include <grpcpp/grpcpp.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/create_channel.h>
+#include <grpcpp/security/credentials.h>
+#include <grpcpp/security/server_credentials.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
+#include <grpcpp/server_context.h>
+#include <grpcpp/support/status.h>
+
 #include "locality_messaging.grpc.pb.h"
 #include "log_store.h"
 
@@ -23,48 +31,56 @@ ChatEntry fromProto(const ChatMessage& m) {
     return e;
 }
 
-ChatMessage toProto(const ChatEntry& e) {
-    ChatMessage m;
-    m.set_message_id(e.message_id);
-    m.set_sender_id(e.sender_id);
-    m.set_payload(e.payload);
-    m.set_lamport_time(e.lamport_time);
-    m.set_epoch(e.epoch);
-    return m;
-}
-
 class DataPlaneGossipImpl final : public DataPlaneGossip::Service {
 public:
     DataPlaneGossipImpl(const std::string& node_id,
                         const std::string& auth_address)
-        : store_(node_id)
-    {
+        : store_(node_id) {
         auth_stub_ = IntegrationAuth::NewStub(
             grpc::CreateChannel(auth_address,
-                grpc::InsecureChannelCredentials()));
-        std::cout << "DataPlane node [" << node_id
-                  << "] auth backend at " << auth_address << "\n";
+                                grpc::InsecureChannelCredentials()));
+
+        std::cerr << "DataPlane node [" << node_id
+                  << "] auth backend at " << auth_address << std::endl;
     }
 
     Status SyncLogs(ServerContext* ctx,
                     const SyncLogsRequest* req,
                     SyncLogsResponse* resp) override {
+        std::cerr << "SyncLogs request received from "
+                  << req->sender().node_id() << std::endl;
 
         std::vector<ChatEntry> incoming;
         incoming.reserve(req->logs_size());
 
+        size_t accepted = 0;
+        size_t rejected = 0;
+
         for (const auto& msg : req->logs()) {
             if (!checkAuth(msg.sender_id(), msg.epoch())) {
+                ++rejected;
                 std::cerr << "Rejected message from " << msg.sender_id()
-                          << " (epoch=" << msg.epoch() << ")\n";
+                          << " (epoch=" << msg.epoch() << ")" << std::endl;
                 continue;
             }
             incoming.push_back(fromProto(msg));
+            ++accepted;
         }
 
-        store_.merge(incoming);
+        if (!incoming.empty()) {
+            store_.merge(incoming);
+        }
+
         resp->set_success(true);
-        resp->set_receiver_lamport_time(store_.get_hash());
+        resp->set_receiver_lamport_time(store_.get_lamport_time());
+
+        std::cerr << "SyncLogs from " << req->sender().node_id()
+                  << " accepted=" << accepted
+                  << " rejected=" << rejected
+                  << " local_lamport="
+                  << resp->receiver_lamport_time()
+                  << std::endl;
+
         return Status::OK;
     }
 
@@ -76,11 +92,13 @@ private:
         AuthCheckRequest req;
         req.set_user_id(user_id);
         req.set_epoch(epoch);
+
         AuthCheckResponse resp;
         grpc::ClientContext ctx;
         Status status = auth_stub_->CheckAuthorization(&ctx, req, &resp);
         if (!status.ok()) {
-            std::cerr << "Auth service unreachable: " << status.error_message() << "\n";
+            std::cerr << "Auth service unreachable: "
+                      << status.error_message() << std::endl;
             return false;
         }
         return resp.is_authorized();
@@ -91,11 +109,13 @@ void RunServer(const std::string& node_id,
                const std::string& listen_address,
                const std::string& auth_address) {
     DataPlaneGossipImpl service(node_id, auth_address);
+
     ServerBuilder builder;
     builder.AddListeningPort(listen_address, grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
+
     std::unique_ptr<Server> server(builder.BuildAndStart());
-    std::cout << "Listening on " << listen_address << "\n";
+    std::cerr << "Listening on " << listen_address << std::endl;
     server->Wait();
 }
 

@@ -21,6 +21,7 @@ public:
     std::vector<ChatEntry>   read_range(size_t from, size_t to) const;
     std::vector<ChatEntry>   all() const;
     uint32_t                get_hash() const;
+    int64_t get_lamport_time() const;
 
     void set_epoch(int32_t epoch);  // called when Venkat bumps the epoch
 
