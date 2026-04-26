@@ -1,4 +1,5 @@
-﻿#include <iostream>
+﻿#include <functional>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -25,6 +26,9 @@ public:
         sender->set_node_id(my_node_id);
         sender->set_address(my_address);
 
+        // Add a small summary for anti-entropy checks.
+        req.mutable_summary()->CopyFrom(BuildSummary(my_node_id, entries));
+
         // Copy local log entries into the request.
         for (const auto& e : entries) {
             ChatMessage* msg = req.add_logs();
@@ -47,10 +51,40 @@ public:
                   << resp.receiver_lamport_time()
                   << ", success=" << std::boolalpha << resp.success()
                   << "\n";
+
+        if (resp.has_summary()) {
+            std::cout << "peer summary: entries="
+                      << resp.summary().entry_count()
+                      << ", max_lamport="
+                      << resp.summary().max_lamport_time()
+                      << "\n";
+        }
+
         return resp.success();
     }
 
 private:
+    static LogSummary BuildSummary(const std::string& node_id,
+                                   const std::vector<ChatEntry>& entries) {
+        LogSummary summary;
+        summary.set_node_id(node_id);
+        summary.set_entry_count(static_cast<int32_t>(entries.size()));
+
+        int64_t max_lamport = 0;
+        uint32_t hash = 0;
+
+        for (const auto& e : entries) {
+            if (e.lamport_time > max_lamport) {
+                max_lamport = e.lamport_time;
+            }
+            hash ^= static_cast<uint32_t>(std::hash<std::string>{}(e.payload));
+        }
+
+        summary.set_max_lamport_time(max_lamport);
+        summary.set_log_hash(hash);
+        return summary;
+    }
+
     std::unique_ptr<DataPlaneGossip::Stub> stub_;
 };
 
@@ -78,7 +112,7 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "Syncing from " << my_node_id
-              << " (" << my_address << ")" << "\n";
+              << " (" << my_address << ")\n";
 
     std::vector<ChatEntry> local_log = BuildSampleLog(my_node_id);
 

@@ -16,14 +16,23 @@ message NodeInfo {
   string address = 2;
 }
 
+message LogSummary {
+  string node_id = 1;
+  int64 max_lamport_time = 2;
+  uint32 log_hash = 3;
+  int32 entry_count = 4;
+}
+
 message SyncLogsRequest {
   NodeInfo sender = 1;
   repeated ChatMessage logs = 2;
+  LogSummary summary = 3;
 }
 
 message SyncLogsResponse {
   bool success = 1;
   int64 receiver_lamport_time = 2;
+  LogSummary summary = 3;
 }
 
 service DataPlaneGossip {

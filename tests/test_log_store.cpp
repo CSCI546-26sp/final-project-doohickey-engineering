@@ -169,7 +169,7 @@ TEST_CASE("LogStore - merge adds new entries from peer", "[store][merge]") {
     LogStore local("node-1");
     local.append("local entry");
 
-    LogEntry peer_entry;
+    ChatEntry peer_entry;
     peer_entry.message_id   = "node-2_5";
     peer_entry.sender_id    = "node-2";
     peer_entry.payload      = "peer entry";
@@ -185,7 +185,7 @@ TEST_CASE("LogStore - merge adds new entries from peer", "[store][merge]") {
 TEST_CASE("LogStore - merge deduplicates by message_id", "[store][merge]") {
     LogStore store("node-1");
 
-    LogEntry e;
+    ChatEntry e;
     e.message_id   = "node-2_1";
     e.sender_id    = "node-2";
     e.payload      = "once";
@@ -198,11 +198,28 @@ TEST_CASE("LogStore - merge deduplicates by message_id", "[store][merge]") {
     REQUIRE(store.all().size() == 1);
 }
 
+TEST_CASE("LogStore - merge is idempotent for repeated batches", "[store][merge]") {
+    LogStore store("node-1");
+
+    ChatEntry e;
+    e.message_id   = "node-2_1";
+    e.sender_id    = "node-2";
+    e.payload      = "once";
+    e.lamport_time = 1;
+    e.epoch        = 0;
+
+    store.merge({e});
+    store.merge({e});
+    store.merge({e});
+
+    REQUIRE(store.all().size() == 1);
+}
+
 TEST_CASE("LogStore - merge orders entries by lamport_time", "[store][merge]") {
     LogStore store("node-1");
 
     // insert out of order
-    LogEntry late, early;
+    ChatEntry late, early;
     late.message_id = "node-2_10"; late.sender_id = "node-2";
     late.payload = "late"; late.lamport_time = 10; late.epoch = 0;
 
@@ -215,10 +232,36 @@ TEST_CASE("LogStore - merge orders entries by lamport_time", "[store][merge]") {
     REQUIRE(all[0].lamport_time <= all[1].lamport_time);
 }
 
+TEST_CASE("LogStore - merge orders equal lamport_time by message_id", "[store][merge]") {
+    LogStore store("node-1");
+
+    ChatEntry a;
+    a.message_id   = "node-3_10";
+    a.sender_id    = "node-3";
+    a.payload      = "a";
+    a.lamport_time = 10;
+    a.epoch        = 0;
+
+    ChatEntry b;
+    b.message_id   = "node-2_10";
+    b.sender_id    = "node-2";
+    b.payload      = "b";
+    b.lamport_time = 10;
+    b.epoch        = 0;
+
+    store.merge({a, b});
+
+    auto all = store.all();
+    REQUIRE(all.size() == 2);
+    REQUIRE(all[0].lamport_time == 10);
+    REQUIRE(all[1].lamport_time == 10);
+    REQUIRE(all[0].message_id < all[1].message_id);
+}
+
 TEST_CASE("LogStore - merge updates local lamport clock", "[store][merge]") {
     LogStore store("node-1"); // clock starts at 0
 
-    LogEntry e;
+    ChatEntry e;
     e.message_id   = "node-2_99";
     e.sender_id    = "node-2";
     e.payload      = "far ahead";
