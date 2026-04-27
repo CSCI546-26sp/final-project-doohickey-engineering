@@ -1,13 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <atomic>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
-#include <atomic>
 #include <thread>
 #include <chrono>
 #include <random>
@@ -62,10 +62,12 @@ private:
 
     // --- The ACL State Machine ---
     int32_t current_epoch_{1};
-    std::unordered_set<std::string> authorized_users_;
+    std::set<std::string> authorized_users_;
 
     // --- Internal Helpers ---
     void connect_peers();
+    void load_state();
+    void persist_state() const;
     void run_background_loop();
     void apply_logs();
     void advance_commit_index();

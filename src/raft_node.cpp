@@ -1,6 +1,13 @@
 #include "raft_node.h"
+#include <fstream>
 #include <iostream>
 #include <grpcpp/grpcpp.h>
+
+namespace {
+std::string get_state_file_path(const std::string& id) {
+    return "raft_state_" + id + ".txt";
+}
+}
 
 RaftNode::RaftNode(const std::string& my_id, const std::map<std::string, std::string>& peer_addrs)
     : id_(my_id), peer_addrs_(peer_addrs) 
@@ -10,6 +17,7 @@ RaftNode::RaftNode(const std::string& my_id, const std::map<std::string, std::st
     dummy.set_term(0);
     log_.push_back(dummy);
 
+    load_state();
     connect_peers();
 
     last_heartbeat_ = std::chrono::steady_clock::now();
@@ -27,6 +35,57 @@ void RaftNode::connect_peers() {
     for (const auto& kv : peer_addrs_) {
         auto channel = grpc::CreateChannel(kv.second, grpc::InsecureChannelCredentials());
         peers_[kv.first] = ControlPlaneRaft::NewStub(channel);
+    }
+}
+
+void RaftNode::load_state() {
+    std::ifstream input(get_state_file_path(id_));
+    if (!input.is_open()) {
+        return;
+    }
+
+    int32_t loaded_term = 0;
+    int32_t loaded_epoch = 1;
+    std::string voted_for_line;
+
+    if (!(input >> loaded_term)) {
+        return;
+    }
+
+    if (!(input >> std::ws) || !std::getline(input, voted_for_line)) {
+        return;
+    }
+
+    if (!(input >> loaded_epoch)) {
+        return;
+    }
+
+    std::set<std::string> loaded_users;
+    std::string user_id;
+    while (std::getline(input >> std::ws, user_id)) {
+        if (!user_id.empty()) {
+            loaded_users.insert(user_id);
+        }
+    }
+
+    current_term_ = loaded_term;
+    voted_for_ = (voted_for_line == "-") ? "" : voted_for_line;
+    current_epoch_ = loaded_epoch;
+    authorized_users_ = std::move(loaded_users);
+}
+
+void RaftNode::persist_state() const {
+    std::ofstream output(get_state_file_path(id_), std::ios::trunc);
+    if (!output.is_open()) {
+        std::cerr << "[Raft] Failed to persist state for node " << id_ << "\n";
+        return;
+    }
+
+    output << current_term_ << '\n';
+    output << (voted_for_.empty() ? "-" : voted_for_) << '\n';
+    output << current_epoch_ << '\n';
+    for (const auto& user : authorized_users_) {
+        output << user << '\n';
     }
 }
 
@@ -81,6 +140,8 @@ void RaftNode::apply_logs() {
             current_epoch_++; // Issue the new certificate!
             std::cout << "[ACL] Revoked user: " << entry.target_user_id() << ". New Epoch: " << current_epoch_ << "\n";
         }
+
+        persist_state();
     }
 }
 
@@ -117,6 +178,7 @@ void RaftNode::start_election() {
     role_ = RaftRole::Candidate;
     current_term_++;
     voted_for_ = id_;
+    persist_state();
     
     auto votes_received = std::make_shared<std::atomic<int>>(1); 
 
@@ -142,6 +204,7 @@ void RaftNode::start_election() {
                     current_term_ = reply.term();
                     role_ = RaftRole::Follower;
                     voted_for_ = "";
+                    persist_state();
                     return;
                 }
 
@@ -197,6 +260,7 @@ void RaftNode::send_heartbeats() {
                     current_term_ = reply.term();
                     role_ = RaftRole::Follower;
                     voted_for_ = "";
+                    persist_state();
                 }
                 
                 if (reply.success()) {
@@ -239,6 +303,7 @@ grpc::Status RaftNode::HandleRequestVote(const RequestVoteArgs* req, RequestVote
         current_term_ = req->term();
         role_ = RaftRole::Follower;
         voted_for_ = "";
+        persist_state();
     }
 
     if (req->term() < current_term_) {
@@ -263,6 +328,7 @@ grpc::Status RaftNode::HandleRequestVote(const RequestVoteArgs* req, RequestVote
         voted_for_ = req->candidate_id();
         role_ = RaftRole::Follower;
         last_heartbeat_ = std::chrono::steady_clock::now(); 
+        persist_state();
         resp->set_vote_granted(true);
     } else {
         resp->set_vote_granted(false);
@@ -279,6 +345,7 @@ grpc::Status RaftNode::HandleAppendEntries(const AppendEntriesArgs* req, AppendE
         current_term_ = req->term();
         role_ = RaftRole::Follower;
         voted_for_ = "";
+        persist_state();
     }
 
     if (req->term() < current_term_) {

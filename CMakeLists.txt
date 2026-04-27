@@ -81,3 +81,7 @@ target_link_libraries(raft_server PRIVATE raftlib)
 add_executable(test_raft_rpcs tests/test_raft_rpcs.cpp)
 target_include_directories(test_raft_rpcs PRIVATE include ${GEN_DIR})
 target_link_libraries(test_raft_rpcs PRIVATE proto_generated Threads::Threads)
+
+add_executable(test_raft_crash tests/test_raft_crash.cpp)
+target_include_directories(test_raft_crash PRIVATE include ${GEN_DIR})
+target_link_libraries(test_raft_crash PRIVATE proto_generated Threads::Threads)
