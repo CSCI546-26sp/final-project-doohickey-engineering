@@ -18,11 +18,13 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: node1
-    command: ./build/log_server node-1 0.0.0.0:50051 auth:50053
+    command: ./build/log_server node-1 0.0.0.0:50051 raft1:50053
     ports:
       - "50051:50051"
     depends_on:
-      - auth
+      - raft1
+      - raft2
+      - raft3
     networks:
       - lognet
 
@@ -32,11 +34,13 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: node2
-    command: ./build/log_server node-2 0.0.0.0:50052 auth:50053
+    command: ./build/log_server node-2 0.0.0.0:50052 raft1:50053
     ports:
       - "50052:50052"
     depends_on:
-      - auth
+      - raft1
+      - raft2
+      - raft3
     networks:
       - lognet
 
@@ -46,23 +50,47 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: node3
-    command: ./build/log_server node-3 0.0.0.0:50053 auth:50053
+    command: ./build/log_server node-3 0.0.0.0:50053 raft1:50053
     ports:
       - "50053:50053"
     depends_on:
-      - auth
+      - raft1
+      - raft2
+      - raft3
     networks:
       - lognet
 
-  # --- venkat's auth stub (fake for now) ---
-  auth:
+  # --- Real Raft Control Plane Cluster ---
+  raft1:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: auth
-    command: ./build/fake_auth_server 0.0.0.0:50053
+    container_name: raft1
+    command: ./build/raft_server raft-1 0.0.0.0:50053 raft2:50053 raft3:50053
     ports:
-      - "50060:50053"
+      - "50053:50053"
+    networks:
+      - lognet
+
+  raft2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: raft2
+    command: ./build/raft_server raft-2 0.0.0.0:50053 raft1:50053 raft3:50053
+    ports:
+      - "50054:50053"
+    networks:
+      - lognet
+
+  raft3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: raft3
+    command: ./build/raft_server raft-3 0.0.0.0:50053 raft1:50053 raft2:50053
+    ports:
+      - "50055:50053"
     networks:
       - lognet
 
