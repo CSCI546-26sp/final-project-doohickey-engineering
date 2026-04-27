@@ -40,8 +40,8 @@ if [ ! -f "$BINARY_DIR/raft_server" ]; then
     exit 1
 fi
 
-if [ ! -f "$BINARY_DIR/raft_test_client" ]; then
-    echo -e "${RED}✗ Failed to build raft_test_client${NC}"
+if [ ! -f "$BINARY_DIR/test_raft_rpcs" ]; then
+    echo -e "${RED}✗ Failed to build test_raft_rpcs${NC}"
     exit 1
 fi
 
@@ -135,7 +135,7 @@ fi
 # ===== STEP 6: RUN TEST CLIENT =====
 echo -e "${YELLOW}[STEP 6] Running test client...${NC}\n"
 
-"$BINARY_DIR/raft_test_client" localhost:50053 localhost:50054 localhost:50055
+"$BINARY_DIR/test_raft_rpcs" localhost:50053 localhost:50054 localhost:50055
 
 TEST_EXIT=$?
 

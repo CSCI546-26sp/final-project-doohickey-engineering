@@ -52,6 +52,14 @@ public:
         return node_->HandleListUsers(req, resp);
     }
 
+    Status GetCertificate(ServerContext* context,
+                          const CertificateRequest* req,
+                          CertificateResponse* resp) override {
+        resp->set_user_id(req->user_id());
+        resp->set_epoch(node_->getCurrentEpoch());
+        return Status::OK;
+    }
+
     // --- Internal Raft RPCs ---
     Status RequestVote(ServerContext* context, const RequestVoteArgs* req, RequestVoteReply* resp) override {
         return node_->HandleRequestVote(req, resp);

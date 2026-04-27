@@ -85,6 +85,11 @@ message ListUsersResponse {
   repeated string authorized_users = 1;
   int32 current_epoch = 2;
 }
+message CertificateRequest { string user_id = 1; }
+message CertificateResponse {
+  string user_id = 1;
+  int32 epoch = 2;
+}
 
 service ControlPlaneRaft {
   rpc RequestVote(RequestVoteArgs) returns (RequestVoteReply);
@@ -92,6 +97,7 @@ service ControlPlaneRaft {
   rpc AddUser(AddUserRequest) returns (AddUserResponse);
   rpc RevokeUser(RevokeUserRequest) returns (RevokeUserResponse);
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc GetCertificate(CertificateRequest) returns (CertificateResponse);
 }
 
 message AuthCheckRequest {

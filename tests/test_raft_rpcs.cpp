@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
 
     std::cout << "\nWaiting for nodes to stabilize (2 seconds)...\n";
     std::this_thread::sleep_for(std::chrono::seconds(2));
+    bool all_tests_passed = true;
 
     // ========== TEST 1: Add Users ==========
     print_separator("TEST 1: ADD USERS");
@@ -87,8 +88,46 @@ int main(int argc, char** argv) {
     std::cout << "\nWaiting for log replication and commit (1 second)...\n";
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    // ========== TEST 2: Check Authorization (Before Revoke) ==========
-    print_separator("TEST 2: CHECK AUTHORIZATION (Before Revoke)");
+    // ========== TEST 2: GetCertificate ==========
+    print_separator("TEST 2: GET CERTIFICATE");
+
+    for (const auto& user : test_users) {
+        std::cout << "\n[CERT] Requesting certificate for user: " << user << "\n";
+
+        CertificateRequest req;
+        req.set_user_id(user);
+
+        bool certificate_ok = false;
+        for (size_t i = 0; i < raft_stubs.size(); ++i) {
+            CertificateResponse resp;
+            ClientContext ctx;
+            Status status = raft_stubs[i]->GetCertificate(&ctx, req, &resp);
+
+            std::cout << "  Node " << i << " (" << node_addrs[i] << "): ";
+            if (status.ok()) {
+                bool valid_user = (resp.user_id() == user);
+                bool valid_epoch = (resp.epoch() >= 1);
+                if (valid_user && valid_epoch) {
+                    std::cout << "✓ CERT OK (user_id=" << resp.user_id()
+                              << ", epoch=" << resp.epoch() << ")\n";
+                    certificate_ok = true;
+                    break;
+                } else {
+                    std::cout << "✗ INVALID CERT (user_id=" << resp.user_id()
+                              << ", epoch=" << resp.epoch() << ")\n";
+                }
+            } else {
+                std::cout << "✗ RPC FAILED: " << status.error_message() << "\n";
+            }
+        }
+
+        if (!certificate_ok) {
+            all_tests_passed = false;
+        }
+    }
+
+    // ========== TEST 3: Check Authorization (Before Revoke) ==========
+    print_separator("TEST 3: CHECK AUTHORIZATION (Before Revoke)");
 
     std::cout << "\nChecking if users are authorized with epoch " << initial_epoch << ":\n";
 
@@ -113,8 +152,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    // ========== TEST 3: Revoke User ==========
-    print_separator("TEST 3: REVOKE USER");
+    // ========== TEST 4: Revoke User ==========
+    print_separator("TEST 4: REVOKE USER");
 
     std::string revoke_user = "bob";
     std::cout << "\n[TEST] Revoking user: " << revoke_user << "\n";
@@ -145,8 +184,8 @@ int main(int argc, char** argv) {
     std::cout << "\nWaiting for revoke log replication and commit (1 second)...\n";
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    // ========== TEST 4: Check Authorization (After Revoke with Old Epoch) ==========
-    print_separator("TEST 4: CHECK WITH OLD EPOCH (After Revoke)");
+    // ========== TEST 5: Check Authorization (After Revoke with Old Epoch) ==========
+    print_separator("TEST 5: CHECK WITH OLD EPOCH (After Revoke)");
 
     std::cout << "\nChecking users with OLD epoch " << initial_epoch << " (should fail for revoked user):\n";
 
@@ -174,8 +213,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    // ========== TEST 5: Check Authorization (After Revoke with New Epoch) ==========
-    print_separator("TEST 5: CHECK WITH NEW EPOCH (After Revoke)");
+    // ========== TEST 6: Check Authorization (After Revoke with New Epoch) ==========
+    print_separator("TEST 6: CHECK WITH NEW EPOCH (After Revoke)");
 
     std::cout << "\nChecking users with NEW epoch " << new_epoch << ":\n";
 
@@ -204,7 +243,11 @@ int main(int argc, char** argv) {
     }
 
     print_separator("TEST COMPLETE");
-    std::cout << "\n✓ All tests completed!\n\n";
+    if (all_tests_passed) {
+        std::cout << "\n✓ All tests completed!\n\n";
+        return 0;
+    }
 
-    return 0;
+    std::cout << "\n✗ One or more tests failed\n\n";
+    return 1;
 }
