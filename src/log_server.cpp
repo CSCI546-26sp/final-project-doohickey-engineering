@@ -7,6 +7,8 @@
 #include <grpcpp/server_builder.h>
 #include <grpcpp/server_context.h>
 #include <grpcpp/support/status.h>
+#include <grpcpp/create_channel.h>              
+#include <grpcpp/security/credentials.h>       
 
 #include "locality_messaging.grpc.pb.h"
 #include "log_store.h"
@@ -49,9 +51,14 @@ public:
     DataPlaneGossipImpl(const std::string& node_id,
                         const std::string& auth_address)
         : node_id_(node_id), store_(node_id) {
-        (void)auth_address;
+
+        // create stub to talk to auth service
+        auth_stub_ = IntegrationAuth::NewStub(
+            grpc::CreateChannel(auth_address,
+                                grpc::InsecureChannelCredentials()));
+
         std::cerr << "DataPlane node [" << node_id
-                  << "] auth backend disabled for now" << std::endl;
+                  << "] auth backend at " << auth_address << std::endl;
     }
 
     Status SyncLogs(ServerContext* ctx,
@@ -77,6 +84,7 @@ public:
         size_t rejected = 0;
 
         for (const auto& msg : req->logs()) {
+            // check with control-plane before accepting
             if (!checkAuth(msg.sender_id(), msg.epoch())) {
                 ++rejected;
                 std::cerr << "Rejected message from " << msg.sender_id()
@@ -96,7 +104,10 @@ public:
 
         resp->set_success(true);
         resp->set_receiver_lamport_time(store_.get_lamport_time());
-        *resp->mutable_summary() = BuildSummary(node_id_, current_entries, current_hash);
+
+        // Return summary so peer can compare state
+        *resp->mutable_summary() =
+            BuildSummary(node_id_, current_entries, current_hash);
 
         std::cerr << "SyncLogs from " << req->sender().node_id()
                   << " accepted=" << accepted
@@ -112,10 +123,26 @@ private:
     std::string node_id_;
     LogStore store_;
 
+    // Auth client stub
+    std::unique_ptr<IntegrationAuth::Stub> auth_stub_;
+
+    // call control-plane to validate user + epoch
     bool checkAuth(const std::string& user_id, int32_t epoch) {
-        (void)user_id;
-        (void)epoch;
-        return true;
+        AuthCheckRequest req;
+        req.set_user_id(user_id);
+        req.set_epoch(epoch);
+
+        AuthCheckResponse resp;
+        grpc::ClientContext ctx;
+
+        auto status = auth_stub_->CheckAuthorization(&ctx, req, &resp);
+        if (!status.ok()) {
+            std::cerr << "Auth RPC failed: "
+                      << status.error_message() << std::endl;
+            return false;
+        }
+
+        return resp.is_authorized();
     }
 };
 
@@ -125,7 +152,8 @@ void RunServer(const std::string& node_id,
     DataPlaneGossipImpl service(node_id, auth_address);
 
     ServerBuilder builder;
-    builder.AddListeningPort(listen_address, grpc::InsecureServerCredentials());
+    builder.AddListeningPort(listen_address,
+                             grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
 
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
@@ -137,6 +165,7 @@ int main(int argc, char** argv) {
     std::string node_id     = argc > 1 ? argv[1] : "node-1";
     std::string listen_addr = argc > 2 ? argv[2] : "0.0.0.0:50051";
     std::string auth_addr   = argc > 3 ? argv[3] : "localhost:50053";
+
     RunServer(node_id, listen_addr, auth_addr);
     return 0;
 }
