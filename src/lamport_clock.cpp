@@ -11,9 +11,10 @@ uint64_t LamportClock::get() const {
 
 void LamportClock::update(uint64_t received) {
     uint64_t current = time_.load();
-    uint64_t desired = received + 1;
-    while (desired > current &&
-           !time_.compare_exchange_weak(current, desired)) {
+    uint64_t desired = std::max(current, received) + 1;
+
+    while (!time_.compare_exchange_weak(current, desired)) {
         desired = std::max(current, received) + 1;
     }
+
 }

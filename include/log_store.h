@@ -22,7 +22,7 @@ public:
     std::vector<ChatEntry>   all() const;
     uint32_t                get_hash() const;
     int64_t get_lamport_time() const;
-
+    size_t size() const;
     void set_epoch(int32_t epoch);  // called when Venkat bumps the epoch
 
 private:

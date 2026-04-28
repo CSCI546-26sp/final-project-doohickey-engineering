@@ -3,7 +3,7 @@
 #include <vector>
 #include <atomic>
 #include "lamport_clock.h"
-
+#include <algorithm>
 TEST_CASE("LamportClock - basic tick", "[clock]") {
     LamportClock clock;
 

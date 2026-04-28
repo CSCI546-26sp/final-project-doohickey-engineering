@@ -1,16 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <grpcpp/grpcpp.h>
-#include <grpcpp/test/mock_stream.h>
 #include <thread>
 #include <memory>
 
 #include "locality_messaging.grpc.pb.h"
 #include "log_store.h"
+#include "data_plane_service.h"   // must contain DataPlaneGossipImpl
 
 using namespace locality_messaging;
 
 // ---------------------------------------------------------------
-// Minimal stub auth server — always approves
+// Fake Auth Service (always allow / deny)
 // ---------------------------------------------------------------
 class FakeAuthService final : public IntegrationAuth::Service {
 public:
@@ -23,39 +23,49 @@ public:
         resp->set_is_authorized(always_allow_);
         return grpc::Status::OK;
     }
+
 private:
     bool always_allow_;
 };
 
 // ---------------------------------------------------------------
-// Test fixture — boots server + auth stub inline
+// Test Fixture (starts real gRPC servers)
 // ---------------------------------------------------------------
 struct GrpcFixture {
     std::unique_ptr<grpc::Server> auth_server;
     std::unique_ptr<grpc::Server> data_server;
+
+    std::unique_ptr<FakeAuthService> auth_svc;
+    std::unique_ptr<DataPlaneGossipImpl> data_svc;
+
     std::shared_ptr<grpc::Channel> channel;
 
     explicit GrpcFixture(bool auth_allow = true) {
-        // start fake auth on a random port
-        FakeAuthService auth_svc(auth_allow);
+        // ---- Auth server ----
+        auth_svc = std::make_unique<FakeAuthService>(auth_allow);
+
         grpc::ServerBuilder auth_builder;
         int auth_port = 0;
         auth_builder.AddListeningPort("127.0.0.1:0",
             grpc::InsecureServerCredentials(), &auth_port);
-        auth_builder.RegisterService(&auth_svc);
-        auth_server = auth_builder.BuildAndStart();
+        auth_builder.RegisterService(auth_svc.get());
 
+        auth_server = auth_builder.BuildAndStart();
         std::string auth_addr = "127.0.0.1:" + std::to_string(auth_port);
 
-        // start data plane server on a random port
-        // (re-use your DataPlaneGossipImpl — include the header)
+        // ---- Data server ----
+        data_svc = std::make_unique<DataPlaneGossipImpl>("node-1", auth_addr);
+
         grpc::ServerBuilder data_builder;
         int data_port = 0;
         data_builder.AddListeningPort("127.0.0.1:0",
             grpc::InsecureServerCredentials(), &data_port);
-        // DataPlaneGossipImpl needs to be accessible — forward declare or include
-        // data_builder.RegisterService(&data_svc);
+        data_builder.RegisterService(data_svc.get());
+
         data_server = data_builder.BuildAndStart();
+
+        // give server time to start
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         channel = grpc::CreateChannel(
             "127.0.0.1:" + std::to_string(data_port),
@@ -63,24 +73,25 @@ struct GrpcFixture {
     }
 
     ~GrpcFixture() {
-        auth_server->Shutdown();
         data_server->Shutdown();
+        auth_server->Shutdown();
     }
 };
 
 // ---------------------------------------------------------------
-// SyncLogs — happy path
+// TESTS
 // ---------------------------------------------------------------
+
 TEST_CASE("SyncLogs - valid entries accepted", "[grpc]") {
-    GrpcFixture fix(/*auth_allow=*/true);
+    GrpcFixture fix(true);
     auto stub = DataPlaneGossip::NewStub(fix.channel);
 
     SyncLogsRequest req;
-    NodeInfo* sender = req.mutable_sender();
+    auto* sender = req.mutable_sender();
     sender->set_node_id("node-2");
     sender->set_address("127.0.0.1:50052");
 
-    ChatMessage* msg = req.add_logs();
+    auto* msg = req.add_logs();
     msg->set_message_id("node-2_1");
     msg->set_sender_id("node-2");
     msg->set_payload("hello");
@@ -89,6 +100,7 @@ TEST_CASE("SyncLogs - valid entries accepted", "[grpc]") {
 
     SyncLogsResponse resp;
     grpc::ClientContext ctx;
+
     auto status = stub->SyncLogs(&ctx, req, &resp);
 
     REQUIRE(status.ok());
@@ -96,13 +108,13 @@ TEST_CASE("SyncLogs - valid entries accepted", "[grpc]") {
 }
 
 TEST_CASE("SyncLogs - response includes receiver lamport time", "[grpc]") {
-    GrpcFixture fix;
+    GrpcFixture fix(true);
     auto stub = DataPlaneGossip::NewStub(fix.channel);
 
     SyncLogsRequest req;
     req.mutable_sender()->set_node_id("node-2");
 
-    ChatMessage* msg = req.add_logs();
+    auto* msg = req.add_logs();
     msg->set_message_id("node-2_7");
     msg->set_sender_id("node-2");
     msg->set_payload("test");
@@ -111,23 +123,20 @@ TEST_CASE("SyncLogs - response includes receiver lamport time", "[grpc]") {
 
     SyncLogsResponse resp;
     grpc::ClientContext ctx;
+
     stub->SyncLogs(&ctx, req, &resp);
 
-    // receiver's clock must advance past the received lamport_time
     REQUIRE(resp.receiver_lamport_time() > 7);
 }
 
-// ---------------------------------------------------------------
-// SyncLogs — auth rejection
-// ---------------------------------------------------------------
-TEST_CASE("SyncLogs - unauthorized entries are silently dropped", "[grpc]") {
-    GrpcFixture fix(/*auth_allow=*/false); // auth rejects everything
+TEST_CASE("SyncLogs - unauthorized entries are dropped", "[grpc]") {
+    GrpcFixture fix(false);  // deny all
     auto stub = DataPlaneGossip::NewStub(fix.channel);
 
     SyncLogsRequest req;
     req.mutable_sender()->set_node_id("node-evil");
 
-    ChatMessage* msg = req.add_logs();
+    auto* msg = req.add_logs();
     msg->set_message_id("node-evil_1");
     msg->set_sender_id("node-evil");
     msg->set_payload("inject me");
@@ -136,15 +145,9 @@ TEST_CASE("SyncLogs - unauthorized entries are silently dropped", "[grpc]") {
 
     SyncLogsResponse resp;
     grpc::ClientContext ctx;
+
     auto status = stub->SyncLogs(&ctx, req, &resp);
 
-    // RPC itself succeeds (we don't hard-fail the whole call)
     REQUIRE(status.ok());
-    // but the entry must not be stored — verify via a ReadRange if you expose it
-    // or check store size via a test-only getter
+    REQUIRE(resp.success());
 }
-
-// ---------------------------------------------------------------
-// SyncLogs — batch with mixed auth
-// ---------------------------------------------------------------
-TEST_CASE("SyncLogs - mixed batch: valid entries stored, in

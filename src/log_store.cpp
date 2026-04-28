@@ -2,6 +2,7 @@
 #include <functional>
 #include <algorithm>
 #include <stdexcept>
+#include <unordered_set>
 
 LogStore::LogStore(const std::string& node_id, int32_t epoch)
     : node_id_(node_id), current_epoch_(epoch) {}
@@ -27,6 +28,7 @@ ChatEntry LogStore::append(const std::string& payload) {
 // ---------------------------------------------------------------
 // Read single
 // ---------------------------------------------------------------
+
 std::optional<ChatEntry> LogStore::read(const std::string& message_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -76,9 +78,14 @@ uint32_t LogStore::get_hash() const {
     return combined_hash;
 }
 
+size_t LogStore::size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return entries_.size();
+}
 // ---------------------------------------------------------------
 // Merge â€” CRDT set union from a peer
-// ---------------------------------------------------------------
+// --------------------------------------------------------------
+/*
 void LogStore::merge(const std::vector<ChatEntry>& incoming) {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -111,7 +118,35 @@ void LogStore::merge(const std::vector<ChatEntry>& incoming) {
             return a.message_id < b.message_id;
         });
 }
+*/
+void LogStore::merge(const std::vector<ChatEntry>& incoming) {
+    std::lock_guard<std::mutex> lock(mutex_);
 
+    std::unordered_set<std::string> existing;
+    for (const auto& e : entries_)
+        existing.insert(e.message_id);
+
+    for (const auto& remote : incoming) {
+
+        // 🔥 ALWAYS update Lamport clock
+        clock_.update(remote.lamport_time);
+
+        // dedup
+        if (existing.count(remote.message_id)) continue;
+
+        ChatEntry e = remote;
+        e.checksum = computeChecksum(e);
+        entries_.push_back(e);
+        existing.insert(e.message_id);
+    }
+
+    std::sort(entries_.begin(), entries_.end(),
+        [](const ChatEntry& a, const ChatEntry& b) {
+            if (a.lamport_time != b.lamport_time)
+                return a.lamport_time < b.lamport_time;
+            return a.message_id < b.message_id;
+        });
+}
 // ---------------------------------------------------------------
 // Epoch
 // ---------------------------------------------------------------
