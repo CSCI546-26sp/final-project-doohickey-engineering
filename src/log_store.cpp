@@ -38,6 +38,29 @@ std::optional<ChatEntry> LogStore::read(const std::string& message_id) const {
     return std::nullopt;
 }
 
+void LogStore::apply(const ChatEntry& entry) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // dedup
+    for (const auto& e : entries_) {
+        if (e.message_id == entry.message_id)
+            return;
+    }
+
+    ChatEntry e = entry;
+    e.checksum = computeChecksum(e);
+
+    entries_.push_back(e);
+
+    clock_.update(e.lamport_time);
+
+    std::sort(entries_.begin(), entries_.end(),
+        [](const ChatEntry& a, const ChatEntry& b) {
+            if (a.lamport_time != b.lamport_time)
+                return a.lamport_time < b.lamport_time;
+            return a.message_id < b.message_id;
+        });
+}
 // ---------------------------------------------------------------
 // Read range â€” by index (0-based)
 // ---------------------------------------------------------------

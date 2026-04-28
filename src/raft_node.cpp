@@ -2,7 +2,7 @@
 #include <fstream>
 #include <iostream>
 #include <grpcpp/grpcpp.h>
-
+#include "log_store.h"
 namespace {
 std::string get_state_file_path(const std::string& id) {
     return "raft_state_" + id + ".txt";
@@ -10,7 +10,7 @@ std::string get_state_file_path(const std::string& id) {
 }
 
 RaftNode::RaftNode(const std::string& my_id, const std::map<std::string, std::string>& peer_addrs)
-    : id_(my_id), peer_addrs_(peer_addrs) 
+    : id_(my_id), peer_addrs_(peer_addrs), store_(my_id)
 {
     // Initialize dummy entry for 1-based indexing safety
     LogEntry dummy;
@@ -140,7 +140,14 @@ void RaftNode::apply_logs() {
             current_epoch_++; // Issue the new certificate!
             std::cout << "[ACL] Revoked user: " << entry.target_user_id() << ". New Epoch: " << current_epoch_ << "\n";
         }
+        ChatEntry ce;
+        ce.sender_id = id_;
+        ce.payload = entry.target_user_id();
+        ce.epoch = current_epoch_;
+        ce.lamport_time = store_.get_lamport_time() + 1;
+        ce.message_id = ce.sender_id + "_" + std::to_string(ce.lamport_time);
 
+        store_.apply(ce);   
         persist_state();
     }
 }
