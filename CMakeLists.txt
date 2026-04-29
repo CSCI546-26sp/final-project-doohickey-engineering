@@ -145,7 +145,7 @@ endforeach()
 
 # Build unified test binary
 add_executable(all_tests
-    tests/test_main.cpp      
+    tests/test_main.cpp      #  explicitly include main
     ${CATCH_TEST_SOURCES}
 )
 
