@@ -24,6 +24,7 @@ public:
     int64_t get_lamport_time() const;
     size_t size() const;
     void set_epoch(int32_t epoch);  // called when Venkat bumps the epoch
+    void apply(const ChatEntry& entry);
 
 private:
     std::string              node_id_;

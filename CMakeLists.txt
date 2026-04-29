@@ -70,6 +70,15 @@ add_library(raftlib src/raft_node.cpp)
 target_include_directories(raftlib PUBLIC include ${GEN_DIR})
 target_link_libraries(raftlib PUBLIC proto_generated Threads::Threads)
 
+target_include_directories(raftlib PUBLIC include ${GEN_DIR})
+
+target_link_libraries(raftlib
+    PUBLIC
+    loglib              
+    proto_generated
+    Threads::Threads
+)
+
 add_executable(raft_server src/raft_server.cpp)
 target_link_libraries(raft_server PRIVATE raftlib)
 
@@ -119,13 +128,14 @@ set(CATCH_TEST_SOURCES "")
 foreach(test_src ${TEST_SOURCES})
     get_filename_component(test_name ${test_src} NAME_WE)
 
-    # 🚫 skip standalone programs (they have their own main)
+    # skip standalone programs (they have their own main)
     if(test_name STREQUAL "test_raft_rpcs" OR
-       test_name STREQUAL "test_raft_crash")
+       test_name STREQUAL "test_raft_crash" OR
+       test_name STREQUAL "test_full_system")
         continue()
     endif()
 
-    # 🚫 skip the main file (we add it explicitly)
+    # skip the main file (we add it explicitly)
     if(test_name STREQUAL "test_main")
         continue()
     endif()
@@ -149,14 +159,28 @@ target_link_libraries(all_tests
     Catch2::Catch2
 )
 
+
+
 add_executable(test_raft_rpcs tests/test_raft_rpcs.cpp)
 target_link_libraries(test_raft_rpcs PRIVATE loglib)
 
 add_executable(test_raft_crash tests/test_raft_crash.cpp)
 target_link_libraries(test_raft_crash PRIVATE loglib)
 
+add_executable(full_system_test tests/test_main.cpp tests/test_full_system.cpp)
+
+target_link_libraries(full_system_test
+    PRIVATE
+    raftlib
+    loglib
+    proto_generated
+    Threads::Threads
+    Catch2::Catch2
+)
+
 add_test(NAME all_tests COMMAND all_tests)
 add_test(NAME raft_rpcs
          COMMAND test_raft_rpcs localhost:50053 localhost:50054 localhost:50055)
 add_test(NAME raft_crash
          COMMAND test_raft_crash)
+add_test(NAME full_system COMMAND full_system_test)

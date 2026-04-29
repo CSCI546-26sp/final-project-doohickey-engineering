@@ -11,63 +11,36 @@ This project implements a distributed messaging system that combines strong cons
 The system demonstrates real-world distributed systems principles including consensus via Raft, log replication, failure recovery, concurrency, and performance benchmarking.
 
 ---
+# Locality-Based Messaging System
+
+Distributed Systems Project — Raft + CRDT Data Plane
+
+---
+
+## Overview
+
+This project implements a distributed messaging system that combines strong consistency (Raft control plane), eventual consistency (CRDT data plane), secure message enforcement (ACL + epochs), and fault tolerance with recovery.
+
+The system demonstrates real-world distributed systems principles including consensus via Raft, log replication, failure recovery, concurrency, and performance benchmarking.
+
+---
 
 ## Architecture
 
 ```
-                +--------------------+
-                |      Clients       |
-                +--------+-----------+
-                         | RPC
-                         v
-         +-------------------------------+
-         |   Control Plane (Raft)        |
-         |   - Leader election           |
-         |   - Ordered log               |
-         |   - ACL management            |
-         +--------+----------------------+
-                  | Apply
-                  v
-         +-------------------------------+
-         |   Data Plane (LogStore)       |
-         |   - Append-only log           |
-         |   - Lamport ordering          |
-         |   - CRDT merge                |
-         +--------+----------------------+
-                  |
-                  v
-         +-------------------------------+
-         |   SyncLogs (Gossip)           |
-         |   - Anti-entropy              |
-         |   - Recovery                  |
-         +-------------------------------+
+node-1 :50051 ──SyncLogs──► node-2 :50052
+     │                           │
+     └──── CheckAuthorization ───┘
+                  │
+             auth :50053
+          (Venkat's IntegrationAuth)
 ```
 
----
+Three roles across the team:
 
-## Components
-
-### Data Plane 
-
-- `LogStore` — append-only log with mutex-protected operations
-- Lamport clock ordering with atomic increment and update
-- CRDT merge using set-union semantics
-- Deterministic log hashing via CRC32
-
-### Control Plane (Raft)
-
-- Leader election with randomised timeouts
-- Log replication across nodes
-- Commit index tracking
-- State machine execution for ACL mutations
-
-### Authorization (IntegrationAuth)
-
-- Per-message validation on every gossip batch
-- Epoch-based revocation — revoked members cannot inject messages
-- Secure enforcement of ACL rules at merge time
-
----
+- **Narayan** — data plane: log storage, Lamport clock, CRDT merge (`DataPlaneGossip`)
+- **Kriti** — sync & merge: gossip fanout, anti-entropy, peer discovery
+- **Venkat** — control plane: Raft leader election, ACL membership, epoch certificates (`IntegrationAuth`)
 
 ## Project Structure
 

@@ -11,6 +11,7 @@
 #include <thread>
 #include <chrono>
 #include <random>
+#include "log_store.h"
 
 
 #include "locality_messaging.grpc.pb.h"
@@ -38,6 +39,7 @@ public:
 
 private:
     std::string id_;
+    LogStore store_;
     std::map<std::string, std::string> peer_addrs_;
     std::unordered_map<std::string, std::unique_ptr<ControlPlaneRaft::Stub>> peers_;
 
