@@ -166,13 +166,7 @@ ctest --test-dir build -V
 
 Measures 1000 sequential operations across 5 runs, reporting average, min, and max latency.
 
-### Throughput Benchmark
 
-```bash
-./build/tput <MaxClients> <PutRatio>
-```
-
-Measures throughput in ops/sec, latency percentiles (P50, P90, P99), and scalability across concurrent clients.
 
 ### Graph Generation
 
