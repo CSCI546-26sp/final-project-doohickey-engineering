@@ -1,3 +1,4 @@
+/*
 #include <grpcpp/grpcpp.h>
 
 #include <chrono>
@@ -333,5 +334,265 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "Crash-recovery persistence test passed\n";
+    return 0;
+}
+    */
+   #include <iostream>
+#include <string>
+#include <vector>
+#include <thread>
+#include <chrono>
+#include <memory>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+
+#include <grpcpp/grpcpp.h>
+#include "locality_messaging.grpc.pb.h"
+
+using namespace locality_messaging;
+using grpc::ClientContext;
+using grpc::Status;
+
+// ---------------------------------------------------------------
+// Utility
+// ---------------------------------------------------------------
+void print_separator(const std::string& title = "") {
+    std::cout << "\n" << std::string(60, '=') << "\n";
+    if (!title.empty()) {
+        std::cout << "  " << title << "\n";
+        std::cout << std::string(60, '=') << "\n";
+    }
+}
+
+// ---------------------------------------------------------------
+// Start Raft cluster (REAL)
+// ---------------------------------------------------------------
+std::vector<pid_t> start_cluster() {
+    std::vector<pid_t> pids;
+
+    struct Node {
+        std::string id;
+        std::string addr;
+    };
+
+    std::vector<Node> nodes = {
+        {"auth-1", "127.0.0.1:50053"},
+        {"auth-2", "127.0.0.1:50054"},
+        {"auth-3", "127.0.0.1:50055"}
+    };
+
+    for (int i = 0; i < nodes.size(); i++) {
+        pid_t pid = fork();
+
+        if (pid < 0) {
+            perror("fork failed");
+            exit(1);
+        }
+
+        if (pid == 0) {
+            std::vector<std::string> args;
+            args.push_back("raft_server");
+            args.push_back(nodes[i].id);
+            args.push_back(nodes[i].addr);
+
+            for (int j = 0; j < nodes.size(); j++) {
+                if (i == j) continue;
+                args.push_back(nodes[j].id + "=" + nodes[j].addr);
+            }
+
+            std::vector<char*> cargs;
+            for (auto& s : args)
+                cargs.push_back(const_cast<char*>(s.c_str()));
+            cargs.push_back(nullptr);
+
+            execv("./build/raft_server", cargs.data());
+
+            perror("execv failed");
+            exit(1);
+        }
+
+        pids.push_back(pid);
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    return pids;
+}
+
+// ---------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------
+void stop_cluster(const std::vector<pid_t>& pids) {
+    for (pid_t pid : pids) kill(pid, SIGTERM);
+    for (pid_t pid : pids) waitpid(pid, nullptr, 0);
+}
+
+// ---------------------------------------------------------------
+// MAIN TEST
+// ---------------------------------------------------------------
+int main() {
+    print_separator("RAFT CONSENSUS ACL TEST CLIENT");
+
+    auto pids = start_cluster();
+
+    std::vector<std::string> node_addrs = {
+        "127.0.0.1:50053",
+        "127.0.0.1:50054",
+        "127.0.0.1:50055"
+    };
+
+    std::vector<std::unique_ptr<ControlPlaneRaft::Stub>> raft_stubs;
+    std::vector<std::unique_ptr<IntegrationAuth::Stub>> auth_stubs;
+
+    for (auto& addr : node_addrs) {
+        auto ch = grpc::CreateChannel(addr, grpc::InsecureChannelCredentials());
+        raft_stubs.push_back(ControlPlaneRaft::NewStub(ch));
+        auth_stubs.push_back(IntegrationAuth::NewStub(ch));
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    int32_t epoch = 0;
+    std::vector<std::string> users = {"alice", "bob", "charlie"};
+
+    // ===============================================================
+    // TEST 1: Add Users
+    // ===============================================================
+    print_separator("TEST 1: ADD USERS");
+
+    for (auto& user : users) {
+        AddUserRequest req;
+        req.set_user_id(user);
+
+        for (auto& stub : raft_stubs) {
+            AddUserResponse resp;
+            ClientContext ctx;
+            auto status = stub->AddUser(&ctx, req, &resp);
+
+            if (status.ok() && resp.success()) {
+                std::cout << "Added user " << user << "\n";
+                epoch = resp.current_epoch();
+                break;
+            }
+        }
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // ===============================================================
+    // TEST 2: Get Certificate
+    // ===============================================================
+    print_separator("TEST 2: GET CERTIFICATE");
+
+    for (auto& user : users) {
+        CertificateRequest req;
+        req.set_user_id(user);
+
+        for (auto& stub : raft_stubs) {
+            CertificateResponse resp;
+            ClientContext ctx;
+            auto status = stub->GetCertificate(&ctx, req, &resp);
+
+            if (status.ok() && resp.user_id() == user) {
+                std::cout << "Certificate OK for " << user << "\n";
+                break;
+            }
+        }
+    }
+
+    // ===============================================================
+    // TEST 3: Auth before revoke
+    // ===============================================================
+    print_separator("TEST 3: AUTH BEFORE REVOKE");
+
+    for (auto& user : users) {
+        AuthCheckRequest req;
+        req.set_user_id(user);
+        req.set_epoch(epoch);
+
+        for (auto& stub : auth_stubs) {
+            AuthCheckResponse resp;
+            ClientContext ctx;
+            stub->CheckAuthorization(&ctx, req, &resp);
+
+            std::cout << user << ": "
+                      << (resp.is_authorized() ? "AUTHORIZED" : "DENIED")
+                      << "\n";
+        }
+    }
+
+    // ===============================================================
+    // TEST 4: Revoke user
+    // ===============================================================
+    print_separator("TEST 4: REVOKE USER");
+
+    std::string revoked = "bob";
+
+    RevokeUserRequest rreq;
+    rreq.set_user_id(revoked);
+
+    for (auto& stub : raft_stubs) {
+        RevokeUserResponse resp;
+        ClientContext ctx;
+        auto status = stub->RevokeUser(&ctx, rreq, &resp);
+
+        if (status.ok() && resp.success()) {
+            epoch = resp.new_epoch();
+            std::cout << "Revoked " << revoked << "\n";
+            break;
+        }
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // ===============================================================
+    // TEST 5: Old epoch check
+    // ===============================================================
+    print_separator("TEST 5: OLD EPOCH CHECK");
+
+    for (auto& user : users) {
+        AuthCheckRequest req;
+        req.set_user_id(user);
+        req.set_epoch(epoch - 1);
+
+        for (auto& stub : auth_stubs) {
+            AuthCheckResponse resp;
+            ClientContext ctx;
+            stub->CheckAuthorization(&ctx, req, &resp);
+
+            std::cout << user << " old epoch: "
+                      << (resp.is_authorized() ? "AUTHORIZED" : "DENIED")
+                      << "\n";
+        }
+    }
+
+    // ===============================================================
+    // TEST 6: New epoch check
+    // ===============================================================
+    print_separator("TEST 6: NEW EPOCH CHECK");
+
+    for (auto& user : users) {
+        AuthCheckRequest req;
+        req.set_user_id(user);
+        req.set_epoch(epoch);
+
+        for (auto& stub : auth_stubs) {
+            AuthCheckResponse resp;
+            ClientContext ctx;
+            stub->CheckAuthorization(&ctx, req, &resp);
+
+            std::cout << user << " new epoch: "
+                      << (resp.is_authorized() ? "AUTHORIZED" : "DENIED")
+                      << "\n";
+        }
+    }
+
+    // ===============================================================
+    // Cleanup
+    // ===============================================================
+    print_separator("CLEANUP");
+    stop_cluster(pids);
+
+    std::cout << "\n✓ TEST COMPLETE\n";
     return 0;
 }

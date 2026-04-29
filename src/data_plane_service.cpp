@@ -89,10 +89,11 @@ grpc::Status DataPlaneGossipImpl::SyncLogs(
         incoming.push_back(fromProto(msg));
         accepted++;
     }
-
+    store_.tick();
     if (!incoming.empty()) {
         store_.merge(incoming);
     }
+    
 
     const auto current_entries = store_.all();
     const uint32_t current_hash = store_.get_hash();

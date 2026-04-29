@@ -1,3 +1,5 @@
+
+/*
 #include <catch2/catch_test_macros.hpp>
 
 #include <vector>
@@ -316,4 +318,275 @@ for (auto& u : users) {
 
     REQUIRE(ok);
 }
+}
+*/
+#include <catch2/catch_test_macros.hpp>
+
+#include <vector>
+#include <thread>
+#include <chrono>
+#include <memory>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <cstdlib>
+
+#include <grpcpp/grpcpp.h>
+#include "locality_messaging.grpc.pb.h"
+
+using namespace locality_messaging;
+using grpc::ClientContext;
+
+// --------------------------------------------------
+// Start raft cluster
+// --------------------------------------------------
+std::vector<pid_t> start_cluster() {
+    std::vector<pid_t> pids;
+
+    struct NodeSpec {
+        const char* id;
+        const char* addr;
+        const char* peer1;
+        const char* peer2;
+    };
+
+    std::vector<NodeSpec> nodes = {
+        {"node-1","127.0.0.1:50053","node-2=127.0.0.1:50054","node-3=127.0.0.1:50055"},
+        {"node-2","127.0.0.1:50054","node-1=127.0.0.1:50053","node-3=127.0.0.1:50055"},
+        {"node-3","127.0.0.1:50055","node-1=127.0.0.1:50053","node-2=127.0.0.1:50054"},
+    };
+
+    for (auto& n : nodes) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl("./build/raft_server",
+                  "raft_server",
+                  n.id,
+                  n.addr,
+                  n.peer1,
+                  n.peer2,
+                  nullptr);
+            exit(1);
+        }
+        pids.push_back(pid);
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    return pids;
+}
+
+// --------------------------------------------------
+void stop_all(const std::vector<pid_t>& pids) {
+    for (auto p : pids) kill(p, SIGTERM);
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    for (auto p : pids) kill(p, SIGKILL);
+
+    for (auto p : pids) waitpid(p, nullptr, 0);
+}
+
+// --------------------------------------------------
+struct ClusterGuard {
+    std::vector<pid_t> nodes;
+
+    ClusterGuard() {
+        system("pkill -f raft_server > /dev/null 2>&1");
+        nodes = start_cluster();
+    }
+
+    ~ClusterGuard() {
+        stop_all(nodes);
+    }
+};
+
+// --------------------------------------------------
+TEST_CASE("Full system integration test", "[system]") {
+
+    ClusterGuard cluster;
+
+    std::vector<std::string> addrs = {
+        "127.0.0.1:50053",
+        "127.0.0.1:50054",
+        "127.0.0.1:50055"
+    };
+
+    std::vector<std::unique_ptr<ControlPlaneRaft::Stub>> raft;
+    std::vector<std::unique_ptr<IntegrationAuth::Stub>> auth;
+
+    for (auto& a : addrs) {
+        auto ch = grpc::CreateChannel(a, grpc::InsecureChannelCredentials());
+        raft.push_back(ControlPlaneRaft::NewStub(ch));
+        auth.push_back(IntegrationAuth::NewStub(ch));
+    }
+
+    std::vector<std::string> users = {"alice","bob","charlie"};
+    int epoch = 0;
+
+    // ===============================
+    // TEST 1: Add users
+    // ===============================
+    for (auto& u : users) {
+        AddUserRequest req;
+        req.set_user_id(u);
+
+        bool success = false;
+
+        for (int retry = 0; retry < 10 && !success; retry++) {
+            for (auto& s : raft) {
+                AddUserResponse resp;
+                ClientContext ctx;
+
+                auto st = s->AddUser(&ctx, req, &resp);
+
+                if (st.ok() && resp.success()) {
+                    epoch = resp.current_epoch();
+                    success = true;
+                    break;
+                }
+            }
+
+            if (!success)
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        }
+
+        REQUIRE(success);
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // ===============================
+    // TEST 2: ACL check
+    // ===============================
+    for (auto& u : users) {
+
+        bool ok = false;
+
+        for (int retry = 0; retry < 10 && !ok; retry++) {
+
+            for (auto& s : auth) {
+
+                AuthCheckRequest req;
+                req.set_user_id(u);
+                req.set_epoch(epoch);
+
+                AuthCheckResponse resp;
+                ClientContext ctx;
+
+                auto st = s->CheckAuthorization(&ctx, req, &resp);
+
+                if (st.ok() && resp.is_authorized()) {
+                    ok = true;
+                    break;
+                }
+            }
+
+            if (!ok)
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+
+        REQUIRE(ok);
+    }
+
+    // ===============================
+    // TEST 3: Crash one node
+    // ===============================
+    kill(cluster.nodes[1], SIGTERM);
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // ===============================
+    // TEST 4: Leader failover
+    // ===============================
+    AddUserRequest extra;
+    extra.set_user_id("david");
+
+    bool ok = false;
+
+    for (int retry = 0; retry < 10 && !ok; retry++) {
+        for (auto& s : raft) {
+
+            AddUserResponse resp;
+            ClientContext ctx;
+
+            auto st = s->AddUser(&ctx, extra, &resp);
+
+            if (st.ok() && resp.success()) {
+                ok = true;
+                break;
+            }
+        }
+
+        if (!ok)
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    }
+
+    REQUIRE(ok);
+
+    // ===============================
+    // TEST 5: Revoke bob
+    // ===============================
+    RevokeUserRequest r;
+    r.set_user_id("bob");
+
+    bool revoke_ok = false;
+
+    for (int retry = 0; retry < 10 && !revoke_ok; retry++) {
+        for (auto& s : raft) {
+
+            RevokeUserResponse resp;
+            ClientContext ctx;
+
+            auto st = s->RevokeUser(&ctx, r, &resp);
+
+            if (st.ok() && resp.success()) {
+                epoch = resp.new_epoch();
+                revoke_ok = true;
+                break;
+            }
+        }
+
+        if (!revoke_ok)
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    }
+
+    REQUIRE(revoke_ok);
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // ===============================
+    // TEST 6: Auth after revoke
+    // ===============================
+    for (auto& u : users) {
+
+        bool ok = false;
+
+        for (int retry = 0; retry < 10 && !ok; retry++) {
+
+            for (auto& s : auth) {
+
+                AuthCheckRequest req;
+                req.set_user_id(u);
+                req.set_epoch(epoch);
+
+                AuthCheckResponse resp;
+                ClientContext ctx;
+
+                auto st = s->CheckAuthorization(&ctx, req, &resp);
+
+                if (!st.ok()) continue;
+
+                if (u == "bob" && !resp.is_authorized())
+                    ok = true;
+
+                if (u != "bob" && resp.is_authorized())
+                    ok = true;
+            }
+
+            if (!ok)
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+
+        REQUIRE(ok);
+    }
 }

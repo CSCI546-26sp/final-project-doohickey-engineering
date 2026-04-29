@@ -28,7 +28,9 @@ ChatEntry LogStore::append(const std::string& payload) {
 // ---------------------------------------------------------------
 // Read single
 // ---------------------------------------------------------------
-
+void LogStore::tick() {
+    clock_.tick();
+}
 std::optional<ChatEntry> LogStore::read(const std::string& message_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -151,17 +153,20 @@ void LogStore::merge(const std::vector<ChatEntry>& incoming) {
 
     for (const auto& remote : incoming) {
 
-        // 🔥 ALWAYS update Lamport clock
-        clock_.update(remote.lamport_time);
-
-        // dedup
-        if (existing.count(remote.message_id)) continue;
-
-        ChatEntry e = remote;
-        e.checksum = computeChecksum(e);
-        entries_.push_back(e);
-        existing.insert(e.message_id);
+    // 🔥 Reject invalid epoch
+    if (remote.epoch != current_epoch_) {
+        continue;
     }
+
+    clock_.update(remote.lamport_time);
+
+    if (existing.count(remote.message_id)) continue;
+
+    ChatEntry e = remote;
+    e.checksum = computeChecksum(e);
+    entries_.push_back(e);
+    existing.insert(e.message_id);
+}
 
     std::sort(entries_.begin(), entries_.end(),
         [](const ChatEntry& a, const ChatEntry& b) {
