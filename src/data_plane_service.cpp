@@ -61,14 +61,33 @@ grpc::Status DataPlaneGossipImpl::SyncLogs(
 {
     (void)ctx;
 
+    std::cerr << "SyncLogs request received from "
+              << req->sender().node_id() << std::endl;
+
+    if (req->has_summary()) {
+        std::cerr << "Incoming summary: entries="
+                  << req->summary().entry_count()
+                  << ", max_lamport="
+                  << req->summary().max_lamport_time()
+                  << std::endl;
+    }
+
     std::vector<ChatEntry> incoming;
     incoming.reserve(req->logs_size());
 
+    int accepted = 0;
+    int rejected = 0;
+
     for (const auto& msg : req->logs()) {
-        if (!checkAuth(msg.sender_id(), msg.epoch()))
+        if (!checkAuth(msg.sender_id(), msg.epoch())) {
+            rejected++;
+            std::cerr << "Rejected message from " << msg.sender_id()
+                      << " (epoch=" << msg.epoch() << ")" << std::endl;
             continue;
+        }
 
         incoming.push_back(fromProto(msg));
+        accepted++;
     }
 
     if (!incoming.empty()) {
@@ -84,8 +103,15 @@ grpc::Status DataPlaneGossipImpl::SyncLogs(
     *resp->mutable_summary() =
         BuildSummary(node_id_, current_entries, current_hash);
 
+    std::cerr << "SyncLogs from " << req->sender().node_id()
+              << " accepted=" << accepted
+              << " rejected=" << rejected
+              << " local_lamport="
+              << resp->receiver_lamport_time()
+              << std::endl;
+
     return grpc::Status::OK;
-}
+} 
 
 // ----------------------------
 // Auth helper
