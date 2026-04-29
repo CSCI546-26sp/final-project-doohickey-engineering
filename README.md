@@ -99,10 +99,10 @@ Start manually:
 ./build/log_server node-1 0.0.0.0:50051 127.0.0.1:50053
 ```
 
-Run automated tests:
+Run full system tests:
 
 ```bash
-ctest --test-dir build -V
+./build/full_system_test
 ```
 
 ---
