@@ -47,7 +47,7 @@ The system demonstrates real-world distributed systems principles including cons
 
 ## Components
 
-### Data Plane (Narayan)
+### Data Plane 
 
 - `LogStore` — append-only log with mutex-protected operations
 - Lamport clock ordering with atomic increment and update
