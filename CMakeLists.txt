@@ -145,7 +145,7 @@ endforeach()
 
 # Build unified test binary
 add_executable(all_tests
-    tests/test_main.cpp      # 🔥 explicitly include main
+    tests/test_main.cpp      
     ${CATCH_TEST_SOURCES}
 )
 
@@ -158,6 +158,8 @@ target_link_libraries(all_tests
     Threads::Threads
     Catch2::Catch2
 )
+
+
 
 add_executable(test_raft_rpcs tests/test_raft_rpcs.cpp)
 target_link_libraries(test_raft_rpcs PRIVATE loglib)
