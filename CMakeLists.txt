@@ -9,8 +9,30 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(PkgConfig REQUIRED)
-find_package(Catch2 REQUIRED)
-find_package(GTest REQUIRED)
+
+include(FetchContent)
+
+find_package(Catch2 CONFIG QUIET)
+
+if(NOT TARGET Catch2::Catch2)
+    find_path(CATCH2_INCLUDE_DIR
+        NAMES catch2/catch_test_macros.hpp
+    )
+
+    if(CATCH2_INCLUDE_DIR)
+        add_library(Catch2::Catch2 INTERFACE IMPORTED)
+        set_target_properties(Catch2::Catch2 PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${CATCH2_INCLUDE_DIR}"
+        )
+    else()
+        FetchContent_Declare(
+            Catch2
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.8.1.zip
+        )
+        FetchContent_MakeAvailable(Catch2)
+    endif()
+endif()
 
 pkg_check_modules(GRPCPP REQUIRED IMPORTED_TARGET grpc++)
 pkg_check_modules(PROTOBUF_PC REQUIRED IMPORTED_TARGET protobuf)
