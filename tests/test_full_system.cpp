@@ -280,10 +280,7 @@ REQUIRE(any_ok);
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    // ===============================
-    // TEST 6: AUTH AFTER REVOKE
-    // ===============================
-    // ===============================
+// ===============================
 // TEST 6: AUTH AFTER REVOKE
 // ===============================
 for (auto& u : users) {
