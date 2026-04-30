@@ -4,7 +4,7 @@ Distributed Systems Project — Raft + CRDT Data Plane
 
 ---
 
-## Overview
+## Overview   
 
 This project implements a distributed messaging system that combines strong consistency (Raft control plane), eventual consistency (CRDT data plane), secure message enforcement (ACL + epochs), and fault tolerance with recovery.
 
