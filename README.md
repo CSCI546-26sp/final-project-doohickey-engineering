@@ -104,7 +104,11 @@ Run full system tests:
 ```bash
 ./build/full_system_test
 ```
+Run full system stress test:
 
+```
+ ./build/test_system_stress
+```
 ---
 
 ## Testing
