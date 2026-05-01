@@ -130,7 +130,7 @@ foreach(test_src ${TEST_SOURCES})
 
     # skip standalone programs (they have their own main)
     if(test_name STREQUAL "test_raft_rpcs" OR
-       test_name STREQUAL "test_raft_crash" OR
+       test_name STREQUAL "test_system_stress" OR
        test_name STREQUAL "test_full_system")
         continue()
     endif()
@@ -164,8 +164,8 @@ target_link_libraries(all_tests
 add_executable(test_raft_rpcs tests/test_raft_rpcs.cpp)
 target_link_libraries(test_raft_rpcs PRIVATE loglib)
 
-add_executable(test_raft_crash tests/test_raft_crash.cpp)
-target_link_libraries(test_raft_crash PRIVATE loglib)
+add_executable(test_system_stress tests/test_system_stress.cpp)
+target_link_libraries(test_system_stress PRIVATE loglib)
 
 add_executable(full_system_test tests/test_main.cpp tests/test_full_system.cpp)
 
