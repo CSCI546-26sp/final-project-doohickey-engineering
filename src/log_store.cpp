@@ -153,7 +153,7 @@ void LogStore::merge(const std::vector<ChatEntry>& incoming) {
 
     for (const auto& remote : incoming) {
 
-    // 🔥 Reject invalid epoch
+    //  Reject invalid epoch
     if (remote.epoch != current_epoch_) {
         continue;
     }
